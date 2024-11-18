@@ -13,9 +13,9 @@ const tileCount = canvas.width / gridSize;
 
 // 难度设置
 const speedSettings = {
-    easy: 150,
-    normal: 100,
-    hard: 60
+    easy: 500,     // 每500ms移动一次，每秒2格
+    normal: 333,   // 每333ms移动一次，每秒3格
+    hard: 250      // 每250ms移动一次，每秒4格
 };
 
 // 游戏状态
@@ -33,7 +33,7 @@ function isMobileDevice() {
 // 如果是移动设备，显示触摸控制
 if (isMobileDevice()) {
     mobileControls.style.display = 'block';
-    // 调整画布大小以适应移动屏幕
+    // 调整画布大小以适移动屏幕
     const screenWidth = Math.min(window.innerWidth - 20, 400);
     canvas.width = screenWidth;
     canvas.height = screenWidth;
@@ -48,6 +48,7 @@ document.getElementById('rightBtn').addEventListener('touchstart', () => changeD
 // 难度选择事件
 difficultySelect.addEventListener('change', function() {
     gameSpeed = speedSettings[this.value];
+    updateSpeedDisplay(this.value);
 });
 
 // 更新最高分
@@ -60,22 +61,27 @@ function updateHighScore() {
 }
 
 // 修改游戏主循环
-function gameLoop() {
+let lastMoveTime = 0;
+
+function gameLoop(currentTime) {
     if (gameOver) return;
     
-    setTimeout(function() {
-        clearCanvas();
-        moveSnake();
-        checkCollision();
-        drawFood();
-        drawSnake();
-        
-        if (!gameOver) {
-            requestAnimationFrame(gameLoop);
-        } else {
-            updateHighScore();
-        }
-    }, gameSpeed);
+    window.requestAnimationFrame(gameLoop);
+    
+    // 计算从上次移动到现在经过的时间
+    if (!lastMoveTime) {
+        lastMoveTime = currentTime;
+        return;
+    }
+    
+    const timeSinceLastMove = currentTime - lastMoveTime;
+    
+    // 只有当经过的时间超过移动间隔时才移动蛇
+    if (timeSinceLastMove >= gameSpeed) {
+        update();
+        draw();
+        lastMoveTime = currentTime;
+    }
 }
 
 // 方向改变函数
@@ -127,6 +133,8 @@ function restartGame() {
     gameOver = false;
     restartBtn.style.display = 'none';
     gameSpeed = speedSettings[difficultySelect.value];
+    
+    initObstacles();
     generateFood();
     gameLoop();
 }
@@ -140,25 +148,177 @@ let snake = {
     nextDy: 0
 };
 
-// 食物位置
-let food = {
-    x: 15,
-    y: 15
+// 添加食物类型
+const foodTypes = {
+    normal: {
+        color: 'red',
+        points: 10,
+        probability: 0.7,
+        effect: null
+    },
+    speed: {
+        color: 'yellow',
+        points: 20,
+        probability: 0.1,
+        effect: (snake) => {
+            const currentSpeed = gameSpeed;
+            gameSpeed = gameSpeed * 0.8;
+            setTimeout(() => { gameSpeed = currentSpeed; }, 5000);
+        }
+    },
+    bonus: {
+        color: 'purple',
+        points: 30,
+        probability: 0.1,
+        effect: null
+    },
+    shrink: {
+        color: 'blue',
+        points: 15,
+        probability: 0.1,
+        effect: (snake) => {
+            if (snake.body.length > 3) {
+                snake.body = snake.body.slice(0, snake.body.length - 2);
+            }
+        }
+    }
 };
 
-// 清空画布
-function clearCanvas() {
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// 修改食物对象结构
+let food = {
+    x: 15,
+    y: 15,
+    type: 'normal'
+};
+
+// 添加障碍物系统
+const obstacles = [];
+const maxObstacles = 5;
+
+// 初始化障碍物
+function initObstacles() {
+    obstacles.length = 0;
+    for (let i = 0; i < maxObstacles; i++) {
+        generateObstacle();
+    }
 }
 
-// 移动蛇
+// 生成障碍物
+function generateObstacle() {
+    let x, y;
+    do {
+        x = Math.floor(Math.random() * tileCount);
+        y = Math.floor(Math.random() * tileCount);
+    } while (isPositionOccupied(x, y));
+    
+    obstacles.push({ x, y });
+}
+
+// 检查位置是否被占用
+function isPositionOccupied(x, y) {
+    // 检查是否与蛇重叠
+    if (snake.body.some(segment => segment.x === x && segment.y === y)) {
+        return true;
+    }
+    // 检查是否与食物重叠
+    if (food.x === x && food.y === y) {
+        return true;
+    }
+    // 检查是否与其他障碍物重叠
+    return obstacles.some(obs => obs.x === x && obs.y === y);
+}
+
+// 修改生成食物的函数
+function generateFood() {
+    let x, y;
+    do {
+        x = Math.floor(Math.random() * tileCount);
+        y = Math.floor(Math.random() * tileCount);
+    } while (isPositionOccupied(x, y));
+
+    // 根据概率选择食物类型
+    const rand = Math.random();
+    let probabilitySum = 0;
+    let selectedType = 'normal';
+    
+    for (const [type, props] of Object.entries(foodTypes)) {
+        probabilitySum += props.probability;
+        if (rand <= probabilitySum) {
+            selectedType = type;
+            break;
+        }
+    }
+
+    food = {
+        x: x,
+        y: y,
+        type: selectedType
+    };
+}
+
+// 修改绘制食物的函数
+function drawFood() {
+    const foodProps = foodTypes[food.type];
+    ctx.beginPath();
+    ctx.arc(
+        food.x * gridSize + gridSize/2,
+        food.y * gridSize + gridSize/2,
+        gridSize/2 - 2,
+        0,
+        Math.PI * 2
+    );
+    ctx.fillStyle = foodProps.color;
+    ctx.fill();
+}
+
+// 绘制障碍物
+function drawObstacles() {
+    ctx.fillStyle = 'gray';
+    obstacles.forEach(obstacle => {
+        ctx.fillRect(
+            obstacle.x * gridSize,
+            obstacle.y * gridSize,
+            gridSize - 2,
+            gridSize - 2
+        );
+    });
+}
+
+// 修改碰撞检测函数
+function checkCollision() {
+    const head = snake.body[0];
+    
+    // 检查墙壁碰撞
+    if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+        gameOver = true;
+        return;
+    }
+    
+    // 检查障碍物碰撞
+    if (obstacles.some(obs => obs.x === head.x && obs.y === head.y)) {
+        gameOver = true;
+        return;
+    }
+    
+    // 检查自身碰撞
+    for (let i = 1; i < snake.body.length; i++) {
+        if (head.x === snake.body[i].x && head.y === snake.body[i].y) {
+            gameOver = true;
+            return;
+        }
+    }
+    
+    if (gameOver) {
+        restartBtn.style.display = 'block';
+        updateHighScore();
+    }
+}
+
+// 修改移动蛇的函数
 function moveSnake() {
-    // 更新方向
     snake.dx = snake.nextDx;
     snake.dy = snake.nextDy;
     
-    // 移动蛇头
     const head = {
         x: snake.body[0].x + snake.dx,
         y: snake.body[0].y + snake.dy
@@ -168,57 +328,75 @@ function moveSnake() {
     
     // 检查是否吃到食物
     if (head.x === food.x && head.y === food.y) {
-        score += 10;
+        const foodProps = foodTypes[food.type];
+        score += foodProps.points;
         scoreElement.textContent = `分数：${score}`;
+        
+        // 应用食物效果
+        if (foodProps.effect) {
+            foodProps.effect(snake);
+        }
+        
         generateFood();
     } else {
         snake.body.pop();
     }
 }
 
-// 检查碰撞
-function checkCollision() {
-    const head = snake.body[0];
-    
-    // 检查墙壁碰撞
-    if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
-        gameOver = true;
-    }
-    
-    // 检查自身碰撞
-    for (let i = 1; i < snake.body.length; i++) {
-        if (head.x === snake.body[i].x && head.y === snake.body[i].y) {
-            gameOver = true;
-        }
-    }
-    
-    if (gameOver) {
-        restartBtn.style.display = 'block';
-    }
+// 修改绘制函数
+function draw() {
+    clearCanvas();
+    drawObstacles();
+    drawFood();
+    drawSnake();
 }
 
-// 绘制食物
-function drawFood() {
-    ctx.fillStyle = 'red';
-    ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
+// 修改更新函数
+function update() {
+    moveSnake();
+    checkCollision();
+}
+
+// 清空画布
+function clearCanvas() {
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
 // 绘制蛇
 function drawSnake() {
-    ctx.fillStyle = 'green';
-    snake.body.forEach(segment => {
+    snake.body.forEach((segment, index) => {
+        ctx.fillStyle = `hsl(${120 + index * 5}, 70%, 50%)`;
         ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize - 2, gridSize - 2);
     });
-}
-
-// 生成新的食物位置
-function generateFood() {
-    food.x = Math.floor(Math.random() * tileCount);
-    food.y = Math.floor(Math.random() * tileCount);
 }
 
 restartBtn.addEventListener('click', restartGame);
 
 // 开始游戏
 generateFood();
-gameLoop(); 
+gameLoop();
+
+// 可以添加游戏音效系统
+function addSoundSystem() {
+    const eatSound = new Audio('eat.mp3');
+    const gameOverSound = new Audio('gameover.mp3');
+    // ... 音效相关代码
+}
+
+// 可以添加游戏暂停功能
+function addPauseFeature() {
+    let isPaused = false;
+    // ... 暂停相关代码
+}
+
+// 添加速度显示更新函数
+function updateSpeedDisplay(difficulty) {
+    const speedDisplay = document.getElementById('speedDisplay');
+    const speed = {
+        easy: "2.0",
+        normal: "3.0",
+        hard: "4.0"
+    };
+    speedDisplay.textContent = `当前速度：每秒${speed[difficulty]}格`;
+} 
