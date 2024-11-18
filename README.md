@@ -1,6 +1,6 @@
 # 浏览器贪吃蛇游戏
 
-在线游玩地址：https://你的用户名.github.io/snake-game
+在线游玩地址：https://Jerrychen1998.github.io/snake-game
 
 这是一个使用 HTML5 Canvas 和 JavaScript 制作的简单贪吃蛇游戏。
 
